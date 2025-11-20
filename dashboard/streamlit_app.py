@@ -36,45 +36,52 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Database connection
+# =========================================================
+# DATABASE & MODEL LOADING
+# =========================================================
+
 @st.cache_resource
 def get_db_connection():
     """Create database connection"""
+    # TODO: sesuaikan dengan konfigurasi DB-mu (user, password, host, dbname)
     engine = create_engine("postgresql://postgres:password@localhost:5432/agriculture")
     return engine
 
-# Load data
 @st.cache_data
 def load_data():
-    """Load data from database"""
+    """Load integrated data from database (2024 only)"""
     engine = get_db_connection()
-    
-    # Only load integrated data (one-year data)
     query = "SELECT * FROM integrated_agriculture_data"
-    return pd.read_sql(query, engine)
+    df = pd.read_sql(query, engine)
+    return df
 
-# Load ML model
 @st.cache_resource
 def load_model():
     """Load trained ML model"""
     model_path = Path("models/harvest_predictor_v1.pkl")
     if model_path.exists():
         model_data = joblib.load(model_path)
-        return model_data['model'], model_data['feature_columns']
+        return model_data["model"], model_data["feature_columns"]
     return None, None
 
-# ========================================
+# =========================================================
 # MAIN APP
-# ========================================
+# =========================================================
 
 def main():
     # Header
-    st.markdown('<h1 class="main-header">🌾 Smart Agriculture Dashboard</h1>', unsafe_allow_html=True)
-    st.markdown("### Prediksi dan Visualisasi Produktivitas Panen Padi (2024)")
+    st.markdown(
+        '<h1 class="main-header">🌾 Smart Agriculture Dashboard</h1>',
+        unsafe_allow_html=True
+    )
+    st.markdown("### Prediksi dan Visualisasi Produktivitas Panen Padi (Tahun 2024)")
     
     # Sidebar
     with st.sidebar:
-        st.image("https://via.placeholder.com/300x100/2E7D32/FFFFFF?text=Smart+Agriculture", width='stretch')
+        st.image(
+            "https://placehold.co/300x100/000000/FFF?text=Smart+Agriculture",
+            width='stretch'
+        )
         st.markdown("---")
         
         page = st.radio(
@@ -84,19 +91,19 @@ def main():
         
         st.markdown("---")
         st.markdown("**Data Sources:**")
-        st.markdown("- BPS Indonesia")
-        st.markdown("- BMKG Weather API")
-        st.markdown("- FAO Statistics")
+        st.markdown("- BPS Indonesia (Produksi Padi 2024)")
+        st.markdown("- BMKG (Data Iklim Rata-rata 2024)")
     
     # Load data
     try:
         df = load_data()
-        df['provinsi'] = df['provinsi'].str.title()  # Capitalize province names
+        # Standarisasi display nama provinsi
+        df["provinsi"] = df["provinsi"].str.title()
     except Exception as e:
         st.error(f"Error loading data: {e}")
         st.stop()
     
-    # Route to different pages
+    # Routing
     if page == "📊 Overview":
         show_overview(df)
     elif page == "🗺️ Regional Analysis":
@@ -108,11 +115,11 @@ def main():
     elif page == "📈 Insights":
         show_insights(df)
 
-# ========================================
+# =========================================================
 # PAGE FUNCTIONS
-# ========================================
+# =========================================================
 
-def show_overview(df):
+def show_overview(df: pd.DataFrame):
     """Overview page with key metrics"""
     st.header("📊 Overview Dashboard (2024)")
     
@@ -120,66 +127,70 @@ def show_overview(df):
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        avg_productivity = df['produktivitas_ton_per_ha'].mean()
+        avg_productivity = df["produktivitas_ton_per_ha"].mean()
         st.metric("Avg Productivity", f"{avg_productivity:.2f} ton/ha")
     
     with col2:
-        total_production = df['produksi_ton'].sum() / 1000000
+        total_production = df["produksi_ton"].sum() / 1_000_000
         st.metric("Total Production", f"{total_production:.1f}M ton")
     
     with col3:
-        total_area = df['luas_panen_ha'].sum() / 1000000
+        total_area = df["luas_panen_ha"].sum() / 1_000_000
         st.metric("Total Area", f"{total_area:.1f}M ha")
     
     with col4:
-        regions_count = df['provinsi'].nunique()
+        regions_count = df["provinsi"].nunique()
         st.metric("Regions Covered", regions_count)
     
     st.markdown("---")
     
     # Productivity distribution
     st.subheader("Productivity Distribution Across Indonesia")
-    fig = px.box(df, y='produktivitas_ton_per_ha', title="Productivity Distribution Across Regions")
-    fig.update_traces(marker_color='#4CAF50')
-    st.plotly_chart(fig, width='stretch')
+    fig_box = px.box(
+        df,
+        y="produktivitas_ton_per_ha",
+        title="Productivity Distribution Across Regions"
+    )
+    st.plotly_chart(fig_box, width='stretch')
     
     # Top performing regions
     st.subheader("🏆 Top 10 Performing Regions")
-    top_regions = df.nlargest(10, 'produktivitas_ton_per_ha')[
-        ['provinsi', 'produktivitas_ton_per_ha', 'produksi_ton', 'suhu_rata_c', 'curah_hujan_mm']
+    top_regions = df.nlargest(
+        10, "produktivitas_ton_per_ha"
+    )[
+        ["provinsi", "produktivitas_ton_per_ha", "produksi_ton", "suhu_rata_c", "curah_hujan_mm"]
     ]
     st.dataframe(top_regions, width='stretch')
 
-def show_regional_analysis(df):
+def show_regional_analysis(df: pd.DataFrame):
     """Regional analysis page"""
     st.header("🗺️ Regional Analysis")
     
-    # Region selector
-    regions = sorted(df['provinsi'].unique())
+    regions = sorted(df["provinsi"].unique())
     selected_region = st.selectbox("Pilih Provinsi", regions)
     
-    df_region = df[df['provinsi'] == selected_region]
+    df_region = df[df["provinsi"] == selected_region]
+    
+    if df_region.empty:
+        st.warning("Data tidak ditemukan untuk provinsi yang dipilih.")
+        return
     
     # Region metrics
     col1, col2, col3 = st.columns(3)
+    row = df_region.iloc[0]
     
     with col1:
-        prod = df_region['produktivitas_ton_per_ha'].iloc[0]
-        st.metric("Productivity", f"{prod:.2f} ton/ha")
-    
+        st.metric("Productivity", f"{row['produktivitas_ton_per_ha']:.2f} ton/ha")
     with col2:
-        temp = df_region['suhu_rata_c'].iloc[0]
-        st.metric("Avg Temperature", f"{temp:.1f}°C")
-    
+        st.metric("Avg Temperature", f"{row['suhu_rata_c']:.1f} °C")
     with col3:
-        rain = df_region['curah_hujan_mm'].iloc[0]
-        st.metric("Rainfall", f"{rain:.0f} mm")
+        st.metric("Rainfall", f"{row['curah_hujan_mm']:.0f} mm")
     
-    # Show full details
+    # Detail data
     st.subheader(f"Detail Data - {selected_region}")
-    st.dataframe(df_region.T.rename(columns={df_region.index[0]: selected_region}))
+    st.dataframe(df_region.T, width='stretch')
 
-def show_weather_impact(df):
+def show_weather_impact(df: pd.DataFrame):
     """Weather impact analysis"""
     st.header("🌦️ Weather Impact on Productivity")
     
@@ -187,83 +198,132 @@ def show_weather_impact(df):
     
     with col1:
         st.subheader("Temperature vs Productivity")
-        fig = px.scatter(df, x='suhu_rata_c', y='produktivitas_ton_per_ha',
-                         size='produksi_ton', color='provinsi',
-                         labels={'suhu_rata_c': 'Temperature (°C)'})
-        st.plotly_chart(fig, width='stretch')
+        fig_temp = px.scatter(
+            df,
+            x="suhu_rata_c",
+            y="produktivitas_ton_per_ha",
+            size="produksi_ton",
+            color="provinsi",
+            labels={"suhu_rata_c": "Temperature (°C)", "produktivitas_ton_per_ha": "Productivity (ton/ha)"},
+            hover_name="provinsi"
+        )
+        st.plotly_chart(fig_temp, width='stretch')
     
     with col2:
         st.subheader("Rainfall vs Productivity")
-        fig = px.scatter(df, x='curah_hujan_mm', y='produktivitas_ton_per_ha',
-                         size='produksi_ton', color='provinsi',
-                         labels={'curah_hujan_mm': 'Rainfall (mm)'})
-        st.plotly_chart(fig, width='stretch')
+        fig_rain = px.scatter(
+            df,
+            x="curah_hujan_mm",
+            y="produktivitas_ton_per_ha",
+            size="produksi_ton",
+            color="provinsi",
+            labels={"curah_hujan_mm": "Rainfall (mm)", "produktivitas_ton_per_ha": "Productivity (ton/ha)"},
+            hover_name="provinsi"
+        )
+        st.plotly_chart(fig_rain, width='stretch')
 
-def show_prediction_tool(df):
-    """Interactive prediction tool"""
+def show_prediction_tool(df: pd.DataFrame):
+    """Interactive prediction tool (sesuai feature set model terbaru)"""
     st.header("🤖 Harvest Prediction Tool")
-    
-    st.info("Sesuaikan parameter di bawah ini untuk memprediksi produktivitas panen.")
+    st.info("Sesuaikan parameter di bawah ini untuk memprediksi produktivitas panen (ton/ha).")
     
     # Load model
     model, feature_cols = load_model()
     
-    if model is None:
+    if model is None or feature_cols is None:
         st.warning("Model belum tersedia. Harap latih model terlebih dahulu.")
         return
     
-    # Input form
     col1, col2 = st.columns(2)
     
     with col1:
         suhu = st.slider("Temperature (°C)", 20.0, 35.0, 26.5, 0.5)
-        curah_hujan = st.slider("Rainfall (mm)", 1000, 4000, 2000, 100)
-        kelembaban = st.slider("Humidity (%)", 60, 95, 75, 5)
-        hari_hujan = st.slider("Rainy Days", 80, 180, 120, 10)
+        curah_hujan = st.slider("Annual Rainfall (mm)", 1000, 4000, 2000, 100)
+        kelembaban = st.slider("Average Humidity (%)", 60, 95, 80, 1)
+        hari_hujan = st.slider("Rainy Days (per year)", 60, 200, 120, 5)
     
     with col2:
-        luas_panen = st.number_input("Harvest Area (ha)", 10000, 100000, 50000, 5000)
+        luas_panen = st.number_input("Harvest Area (ha)", 1_000, 200_000, 50_000, 1_000)
+        # Fitur turunan sesuai pipeline transform.py
         drought_index = curah_hujan / (suhu * 100)
-        humidity_stress = 1 if kelembaban < 60 or kelembaban > 90 else 0
         interaction = curah_hujan * suhu
+        
+        st.caption(f"📌 Drought index (approx): {drought_index:.4f}")
     
     # Predict
     if st.button("🎯 Predict Productivity", type="primary"):
-        input_data = pd.DataFrame({
-            'suhu_rata_c': [suhu],
-            'curah_hujan_mm': [curah_hujan],
-            'kelembaban_persen': [kelembaban],
-            'hari_hujan': [hari_hujan],
-            'luas_panen_ha': [luas_panen],
-            'drought_index': [drought_index],
-            'humidity_stress': [humidity_stress],
-            'curah_hujan_x_suhu': [interaction]
-        })
+        # DataFrame input harus punya kolom yang sama dengan feature_columns model
+        raw_input = {
+            "suhu_rata_c": [suhu],
+            "curah_hujan_mm": [curah_hujan],
+            "kelembaban_persen": [kelembaban],
+            "hari_hujan": [hari_hujan],
+            "luas_panen_ha": [luas_panen],
+            "drought_index": [drought_index],
+            "curah_hujan_x_suhu": [interaction],
+        }
         
-        prediction = model.predict(input_data)[0]
-        st.success(f"### Predicted Productivity: {prediction:.2f} ton/ha")
+        input_df = pd.DataFrame(raw_input)
+        
+        # Reorder kolom sesuai feature_cols dari model_training
+        try:
+            input_df = input_df[feature_cols]
+        except KeyError as e:
+            st.error(f"Kolom input tidak cocok dengan model: {e}")
+            st.write("Fitur yang diminta model:", feature_cols)
+            st.write("Fitur yang tersedia di input:", list(input_df.columns))
+            return
+        
+        prediction = model.predict(input_df)[0]
+        st.success(f"### Predicted Productivity: **{prediction:.2f} ton/ha**")
 
-def show_insights(df):
+def show_insights(df: pd.DataFrame):
     """Insights and analysis"""
     st.header("📈 Insights")
     
-    # Top and bottom regions
-    st.subheader("Best and Worst Performing Regions")
-    top_region = df.nlargest(1, 'produktivitas_ton_per_ha')
-    bottom_region = df.nsmallest(1, 'produktivitas_ton_per_ha')
+    # Best and worst regions
+    st.subheader("Best and Worst Performing Regions (2024)")
+    top_region = df.nlargest(1, "produktivitas_ton_per_ha")
+    bottom_region = df.nsmallest(1, "produktivitas_ton_per_ha")
     
-    st.write("🏆 **Best:**")
-    st.dataframe(top_region[['provinsi', 'produktivitas_ton_per_ha']])
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("🏆 **Best Region:**")
+        st.dataframe(top_region[["provinsi", "produktivitas_ton_per_ha"]], width='stretch')
+    with col2:
+        st.write("❌ **Lowest Region:**")
+        st.dataframe(bottom_region[["provinsi", "produktivitas_ton_per_ha"]], width='stretch')
     
-    st.write("❌ **Worst:**")
-    st.dataframe(bottom_region[['provinsi', 'produktivitas_ton_per_ha']])
+    st.markdown("---")
     
-    # Correlation heatmap
-    st.subheader("Feature Correlation")
-    corr = df[['suhu_rata_c', 'curah_hujan_mm', 'kelembaban_persen', 'hari_hujan', 'produktivitas_ton_per_ha']].corr()
-    fig = px.imshow(corr, text_auto=True, aspect="auto", color_continuous_scale='RdYlGn')
-    st.plotly_chart(fig, width='stretch')
+    # Correlation heatmap for main numeric variables
+    st.subheader("Feature Correlation (2024)")
+    numeric_cols = [
+        "suhu_rata_c",
+        "curah_hujan_mm",
+        "kelembaban_persen",
+        "hari_hujan",
+        "luas_panen_ha",
+        "produktivitas_ton_per_ha",
+    ]
+    available_cols = [c for c in numeric_cols if c in df.columns]
+    
+    if len(available_cols) >= 2:
+        corr = df[available_cols].corr()
+        fig_corr = px.imshow(
+            corr,
+            text_auto=True,
+            aspect="auto",
+            color_continuous_scale="RdYlGn",
+            title="Correlation Matrix"
+        )
+        st.plotly_chart(fig_corr, width='stretch')
+    else:
+        st.info("Kolom numerik untuk korelasi tidak mencukupi.")
 
-# Run app
+# =========================================================
+# RUN APP
+# =========================================================
+
 if __name__ == "__main__":
     main()

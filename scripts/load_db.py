@@ -14,19 +14,21 @@ class DatabaseLoader:
         db_config = config['database']
         
         # Create connection string
-        self.connection_string = (
-            f"postgresql://{db_config['user']}:{db_config['password']}"
-            f"@{db_config['host']}:{db_config['port']}/{db_config['database']}"
-        )
+        user = db_config['user']
+        password = db_config['password']
+        host = db_config['host']
+        port = db_config['port']
+        dbname = db_config['database']
         
-        self.engine = create_engine(self.connection_string)
+        conn_str = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+        self.engine = create_engine(conn_str)
     
     def create_tables(self):
-        """Create database schema"""
-        print("📊 Creating database tables...")
+        """Create tables for raw and processed data"""
+        print("🗄️ Creating tables...")
         
         schema_sql = """
-        -- Table untuk data mentah BPS
+        -- Table untuk data BPS raw
         DROP TABLE IF EXISTS raw_bps_data CASCADE;
         CREATE TABLE raw_bps_data (
             id SERIAL PRIMARY KEY,
@@ -51,19 +53,19 @@ class DatabaseLoader:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         
-        -- Table untuk data terintegrasi (final)
+        -- Table untuk data terintegrasi + fitur
         DROP TABLE IF EXISTS integrated_agriculture_data CASCADE;
         CREATE TABLE integrated_agriculture_data (
             id SERIAL PRIMARY KEY,
             tahun INTEGER NOT NULL,
             provinsi VARCHAR(100),
             
-            -- Agricultural data
+            -- BPS
             luas_panen_ha FLOAT,
             produksi_ton FLOAT,
             produktivitas_ton_per_ha FLOAT,
             
-            -- Weather data
+            -- Weather
             suhu_rata_c FLOAT,
             curah_hujan_mm FLOAT,
             kelembaban_persen FLOAT,
@@ -73,14 +75,13 @@ class DatabaseLoader:
             suhu_kategori VARCHAR(20),
             hujan_kategori VARCHAR(20),
             drought_index FLOAT,
-            humidity_stress INTEGER,
-            produktivitas_prev_year FLOAT,
+            -- humidity_stress INTEGER,          -- ❌ DIHAPUS
+            -- produktivitas_prev_year FLOAT,    -- ❌ DIHAPUS
             curah_hujan_x_suhu FLOAT,
             luas_x_kelembaban FLOAT,
             
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             
-            -- Index untuk query performa
             CONSTRAINT unique_year_provinsi UNIQUE (tahun, provinsi)
         );
         
@@ -97,7 +98,7 @@ class DatabaseLoader:
             prediction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         
-        -- Create indexes
+        -- Indexes
         CREATE INDEX idx_integrated_tahun ON integrated_agriculture_data(tahun);
         CREATE INDEX idx_integrated_provinsi ON integrated_agriculture_data(provinsi);
         CREATE INDEX idx_prediction_tahun ON prediction_results(tahun);
@@ -107,122 +108,27 @@ class DatabaseLoader:
             for statement in schema_sql.split(';'):
                 if statement.strip():
                     conn.execute(text(statement))
-            conn.commit()
         
         print("  ✓ Tables created successfully")
     
-    def load_data(self, df, table_name, if_exists='replace'):
-        """Load DataFrame to database"""
-        print(f"📥 Loading data to {table_name}...")
-        
-        try:
-            df.to_sql(
-                table_name,
-                self.engine,
-                if_exists=if_exists,
-                index=False,
-                method='multi',
-                chunksize=1000
-            )
-            print(f"  ✓ Loaded {len(df)} rows to {table_name}")
-            return True
-        except Exception as e:
-            print(f"  ✗ Error loading data: {e}")
-            return False
+    def load_data(self, df: pd.DataFrame, table_name: str, if_exists: str = "replace"):
+        """Load DataFrame ke database"""
+        print(f"⬆️ Loading data to table '{table_name}'...")
+        df.to_sql(table_name, self.engine, if_exists=if_exists, index=False)
+        print("  ✓ Data loaded")
     
-    def verify_data(self):
-        """Verify data yang sudah di-load"""
-        print("\n🔍 Verifying loaded data...")
-        
-        verification_queries = {
-            'raw_bps_data': "SELECT COUNT(*) as count FROM raw_bps_data",
-            'raw_weather_data': "SELECT COUNT(*) as count FROM raw_weather_data",
-            'integrated_agriculture_data': "SELECT COUNT(*) as count FROM integrated_agriculture_data"
-        }
-        
-        with self.engine.connect() as conn:
-            for table, query in verification_queries.items():
-                result = conn.execute(text(query)).fetchone()
-                print(f"  {table}: {result[0]} rows")
-    
-    def create_views(self):
-        """Create useful views untuk analytics"""
-        print("\n📊 Creating analytical views...")
-        
-        views_sql = """
-        -- View: Produktivitas per provinsi per tahun
-        CREATE OR REPLACE VIEW v_productivity_by_province AS
-        SELECT 
-            tahun,
-            provinsi,
-            AVG(produktivitas_ton_per_ha) as avg_productivity,
-            SUM(produksi_ton) as total_production,
-            SUM(luas_panen_ha) as total_area
-        FROM integrated_agriculture_data
-        GROUP BY tahun, provinsi
-        ORDER BY tahun, provinsi;
-        
-        -- View: Pengaruh cuaca terhadap produktivitas
-        CREATE OR REPLACE VIEW v_weather_impact AS
-        SELECT 
-            tahun,
-            hujan_kategori,
-            suhu_kategori,
-            AVG(produktivitas_ton_per_ha) as avg_productivity,
-            COUNT(*) as sample_count
-        FROM integrated_agriculture_data
-        GROUP BY tahun, hujan_kategori, suhu_kategori
-        ORDER BY tahun, hujan_kategori, suhu_kategori;
-        
-        -- View: Trend produktivitas
-        CREATE OR REPLACE VIEW v_productivity_trend AS
-        SELECT 
-            tahun,
-            provinsi AS region_key,
-            produktivitas_ton_per_ha,
-            LAG(produktivitas_ton_per_ha) OVER (PARTITION BY provinsi ORDER BY tahun) as prev_year_productivity,
-            produktivitas_ton_per_ha - LAG(produktivitas_ton_per_ha) OVER (PARTITION BY provinsi ORDER BY tahun) as productivity_change
-        FROM integrated_agriculture_data
-        ORDER BY provinsi, tahun;
-        """
-        
-        with self.engine.connect() as conn:
-            for statement in views_sql.split(';'):
-                if statement.strip():
-                    conn.execute(text(statement))
-            conn.commit()
-        
-        print("  ✓ Views created successfully")
 
-# Usage
 if __name__ == "__main__":
-    # Initialize loader
     loader = DatabaseLoader()
     
     # Create tables
     loader.create_tables()
     
-    # Load data
-    print("\n" + "="*60)
-    print("LOADING DATA TO DATABASE")
-    print("="*60)
-    
-    # Load raw BPS data
+    # Load raw & processed
     df_bps = pd.read_csv("data/raw/bps_2024_clean.csv")
-    loader.load_data(df_bps, 'raw_bps_data')
-    
-    # Load raw weather data
     df_weather = pd.read_csv("data/raw/bmkg_weather_data.csv")
-    loader.load_data(df_weather, 'raw_weather_data')
+    df_final = pd.read_csv("data/processed/final_dataset.csv")
     
-    # Load integrated data
-    df_integrated = pd.read_csv("data/processed/final_dataset.csv")
-    loader.load_data(df_integrated, 'integrated_agriculture_data')
-    
-    # Create views
-    loader.create_views()
-    
-    # Verify
-    loader.verify_data()
-    
-    print("\n✓ All data loaded successfully!")
+    loader.load_data(df_bps, "raw_bps_data")
+    loader.load_data(df_weather, "raw_weather_data")
+    loader.load_data(df_final, "integrated_agriculture_data")

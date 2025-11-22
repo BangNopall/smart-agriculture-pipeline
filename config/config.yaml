@@ -8,32 +8,6 @@ database:
   user: postgres
   password: password
 
-# Data Sources
-data_sources:
-  bps:
-    url: "https://www.bps.go.id/"
-    local_path: "data/raw/bps_produksi_padi.csv"
-  
-  bmkg:
-    url: "https://dataonline.bmkg.go.id/"
-    local_path: "data/raw/rata_rata_provinsi_2024.csv"
-
-# Data Processing
-processing:
-  years:
-    start: 2020
-    end: 2024
-  
-  test_split_ratio: 0.2
-  random_seed: 42
-  
-  outlier_removal:
-    method: "IQR"
-    multiplier: 1.5
-  
-  missing_value_strategy:
-    numeric: "median"
-    categorical: "mode"
 
 # Model Configuration
 model:
@@ -52,14 +26,6 @@ model:
     - curah_hujan_x_suhu
   
   target: "produktivitas_ton_per_ha"
-
-# Airflow Configuration
-airflow:
-  dag_id: "smart_agriculture_etl"
-  schedule: "@monthly"
-  start_date: "2024-01-01"
-  catchup: false
-  max_active_runs: 1
 
 # Dashboard Configuration
 dashboard:
